@@ -176,9 +176,7 @@
 #define PROTOCOL_BINARY_CMD_EVICT_KEY               0x93
 #define PROTOCOL_BINARY_CMD_GET_LOCKED              0x94
 #define PROTOCOL_BINARY_CMD_UNLOCK_KEY              0x95
-#define PROTOCOL_BINARY_CMD_SYNC                    0x96
-#define PROTOCOL_BINARY_CMD_OBSERVE                 0xb1
-#define PROTOCOL_BINARY_CMD_UNOBSERVE               0xb2
+#define PROTOCOL_BINARY_CMD_OBSERVE                 0x96
 #define PROTOCOL_BINARY_CMD_LAST_CLOSED_CHECKPOINT  0x97
 #define PROTOCOL_BINARY_CMD_RESTORE_FILE            0x98
 #define PROTOCOL_BINARY_CMD_RESTORE_ABORT           0x99
@@ -214,6 +212,8 @@
  static int hf_total_bodylength = -1;
  static int hf_opaque = -1;
  static int hf_cas = -1;
+ static int hf_ttp = -1;
+ static int hf_ttr = -1;
  static int hf_extras = -1;
  static int hf_extras_flags = -1;
  static int hf_extras_flags_backfill = -1;
@@ -234,10 +234,17 @@
  static int hf_value = -1;
  static int hf_value_missing = -1;
  static int hf_uint64_response = -1;
+ static int hf_observe = -1;
+ static int hf_observe_vbucket = -1;
+ static int hf_observe_keylength = -1;
+ static int hf_observe_key = -1;
+ static int hf_observe_status = -1;
+ static int hf_observe_cas = -1;
 
  static gint ett_couchbase = -1;
  static gint ett_extras = -1;
  static gint ett_extras_flags = -1;
+ static gint ett_observe = -1;
 
  static const value_string magic_vals[] = {
    { MAGIC_REQUEST,     "Request"  },
@@ -339,9 +346,7 @@ static const value_string opcode_vals[] = {
   { PROTOCOL_BINARY_CMD_EVICT_KEY,                  "Evict Key"                },
   { PROTOCOL_BINARY_CMD_GET_LOCKED,                 "Get Locked"               },
   { PROTOCOL_BINARY_CMD_UNLOCK_KEY,                 "Unlock Key"               },
-  { PROTOCOL_BINARY_CMD_SYNC,                       "Sync"                     },
   { PROTOCOL_BINARY_CMD_OBSERVE,                    "Observe"                  },
-  { PROTOCOL_BINARY_CMD_UNOBSERVE,                  "Unobserve"                },
   { PROTOCOL_BINARY_CMD_LAST_CLOSED_CHECKPOINT,     "Last Closed Checkpoint"   },
   { PROTOCOL_BINARY_CMD_RESTORE_FILE,               "Restore File"             },
   { PROTOCOL_BINARY_CMD_RESTORE_ABORT,              "Restore Abort"            },
@@ -514,20 +519,10 @@ dissect_extras(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
   case PROTOCOL_BINARY_CMD_PREPEND:
   case PROTOCOL_BINARY_CMD_PREPENDQ:
   case PROTOCOL_BINARY_CMD_STAT:
-  case PROTOCOL_BINARY_CMD_UNOBSERVE:
+  case PROTOCOL_BINARY_CMD_OBSERVE:
     /* Must not have extras */
     if (extlen) {
       illegal = TRUE;
-    }
-    break;
-
-  case PROTOCOL_BINARY_CMD_OBSERVE:
-    if (extlen) {
-      proto_tree_add_item (extras_tree, hf_extras_expiration, tvb, offset, 4, ENC_BIG_ENDIAN);
-      offset += 4;
-    } else if (request) {
-      /* Request must have extras */
-      missing = TRUE;
     }
     break;
 
@@ -690,11 +685,32 @@ dissect_value(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
               gint offset, guint32 value_len, guint8 opcode, gboolean request)
 {
   proto_item *ti = NULL;
+  proto_tree *observe_tree;
   gboolean    illegal = FALSE;  /* Set when value shall not be present */
   gboolean    missing = FALSE;  /* Set when value is missing */
 
   if (value_len > 0) {
-    if (!request && ((opcode == PROTOCOL_BINARY_CMD_INCREMENT) || (opcode == PROTOCOL_BINARY_CMD_DECREMENT))) {
+    if (opcode == PROTOCOL_BINARY_CMD_OBSERVE) {
+      gint oo = offset, end = offset + value_len;
+      ti = proto_tree_add_item(tree, hf_observe, tvb, offset, value_len, ENC_NA);
+      observe_tree = proto_item_add_subtree(ti, ett_observe);
+      while (oo < end) {
+        guint16 kl; /* keylength */
+        proto_tree_add_item(observe_tree, hf_observe_vbucket, tvb, oo, 2, ENC_BIG_ENDIAN);
+        oo += 2;
+        kl = tvb_get_ntohs(tvb, oo);
+        proto_tree_add_item(observe_tree, hf_observe_keylength, tvb, oo, 2, ENC_BIG_ENDIAN);
+        oo += 2;
+        proto_tree_add_item(observe_tree, hf_observe_key, tvb, oo, kl, ENC_BIG_ENDIAN);
+        oo += kl;
+        if (!request) {
+          proto_tree_add_item(observe_tree, hf_observe_status, tvb, oo, 1, ENC_BIG_ENDIAN);
+          oo++;
+          proto_tree_add_item(observe_tree, hf_observe_cas, tvb, oo, 8, ENC_BIG_ENDIAN);
+          oo += 8;
+        }
+      }
+    } else if (!request && ((opcode == PROTOCOL_BINARY_CMD_INCREMENT) || (opcode == PROTOCOL_BINARY_CMD_DECREMENT))) {
       ti = proto_tree_add_item(tree, hf_uint64_response, tvb, offset, 8, ENC_BIG_ENDIAN);
       if (value_len != 8) {
         expert_add_info_format(pinfo, ti, PI_UNDECODED, PI_WARN, "Illegal Value length, should be 8");
@@ -843,8 +859,10 @@ dissect_couchbase(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
     request = TRUE;
     vbucket = tvb_get_ntohs(tvb, offset);
     proto_tree_add_item(couchbase_tree, hf_vbucket, tvb, offset, 2, ENC_BIG_ENDIAN);
-    proto_item_append_text(couchbase_item, ", VBucket: 0x%x", vbucket);
-    col_append_fstr(pinfo->cinfo, COL_INFO, ", VBucket: 0x%x", vbucket);
+    if (opcode != PROTOCOL_BINARY_CMD_OBSERVE) {
+      proto_item_append_text(couchbase_item, ", VBucket: 0x%x", vbucket);
+      col_append_fstr(pinfo->cinfo, COL_INFO, ", VBucket: 0x%x", vbucket);
+    }
   }
   offset += 2;
 
@@ -861,8 +879,15 @@ dissect_couchbase(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
   proto_tree_add_item(couchbase_tree, hf_opaque, tvb, offset, 4, ENC_LITTLE_ENDIAN);
   offset += 4;
 
-  proto_tree_add_item(couchbase_tree, hf_cas, tvb, offset, 8, ENC_BIG_ENDIAN);
-  offset += 8;
+  if (opcode == PROTOCOL_BINARY_CMD_OBSERVE) {
+    proto_tree_add_item(couchbase_tree, hf_ttp, tvb, offset, 4, ENC_BIG_ENDIAN);
+    offset += 4;
+    proto_tree_add_item(couchbase_tree, hf_ttr, tvb, offset, 4, ENC_BIG_ENDIAN);
+    offset += 4;
+  } else {
+    proto_tree_add_item(couchbase_tree, hf_cas, tvb, offset, 8, ENC_BIG_ENDIAN);
+    offset += 8;
+  }
 
   if (status == 0) {
     dissect_extras(tvb, pinfo, couchbase_tree, offset, extlen, opcode, request);
@@ -941,7 +966,7 @@ proto_register_couchbase(void)
       &hf_magic,
       {
         "Magic", "couchbase.magic",
-        FT_UINT8, BASE_DEC, VALS(magic_vals), 0x0,
+        FT_UINT8, BASE_HEX, VALS(magic_vals), 0x0,
         "Magic number", HFILL
       }
     },
@@ -950,7 +975,7 @@ proto_register_couchbase(void)
       &hf_opcode,
       {
         "Opcode", "couchbase.opcode",
-        FT_UINT8, BASE_DEC, VALS(opcode_vals), 0x0,
+        FT_UINT8, BASE_HEX, VALS(opcode_vals), 0x0,
         "Command code", HFILL
       }
     },
@@ -958,7 +983,7 @@ proto_register_couchbase(void)
     {
       &hf_extlength,
       {
-        "Extras length", "couchbase.extras.length",
+        "Extras Length", "couchbase.extras.length",
         FT_UINT8, BASE_DEC, NULL, 0x0,
         "Length in bytes of the command extras", HFILL
       }
@@ -976,7 +1001,7 @@ proto_register_couchbase(void)
     {
       &hf_value_length,
       {
-        "Value length", "couchbase.value.length",
+        "Value Length", "couchbase.value.length",
         FT_UINT32, BASE_DEC, NULL, 0x0,
         "Length in bytes of the value that follows the key", HFILL
       }
@@ -985,8 +1010,8 @@ proto_register_couchbase(void)
     {
       &hf_datatype,
       {
-        "Data type", "couchbase.datatype",
-        FT_UINT8, BASE_DEC, VALS(datatype_vals), 0x0,
+        "Data Type", "couchbase.datatype",
+        FT_UINT8, BASE_HEX, VALS(datatype_vals), 0x0,
         NULL, HFILL
       }
     },
@@ -995,7 +1020,7 @@ proto_register_couchbase(void)
       &hf_vbucket,
       {
         "VBucket", "couchbase.vbucket",
-        FT_UINT16, BASE_DEC, NULL, 0x0,
+        FT_UINT16, BASE_HEX, NULL, 0x0,
         "VBucket ID", HFILL
       }
     },
@@ -1004,7 +1029,7 @@ proto_register_couchbase(void)
       &hf_status,
       {
         "Status", "couchbase.status",
-        FT_UINT16, BASE_DEC, VALS(status_vals), 0x0,
+        FT_UINT16, BASE_HEX, VALS(status_vals), 0x0,
         "Status of the response", HFILL
       }
     },
@@ -1012,7 +1037,7 @@ proto_register_couchbase(void)
     {
       &hf_total_bodylength,
       {
-        "Total body length", "couchbase.total_bodylength",
+        "Total Body Length", "couchbase.total_bodylength",
         FT_UINT32, BASE_DEC, NULL, 0x0,
         "Length in bytes of extra + key + value", HFILL
       }
@@ -1022,7 +1047,7 @@ proto_register_couchbase(void)
       &hf_opaque,
       {
         "Opaque", "couchbase.opaque",
-        FT_UINT32, BASE_DEC, NULL, 0x0,
+        FT_UINT32, BASE_HEX, NULL, 0x0,
         NULL, HFILL
       }
     },
@@ -1031,8 +1056,26 @@ proto_register_couchbase(void)
       &hf_cas,
       {
         "CAS", "couchbase.cas",
-        FT_UINT64, BASE_DEC, NULL, 0x0,
+        FT_UINT64, BASE_HEX, NULL, 0x0,
         "Data version check", HFILL
+      }
+    },
+
+    {
+      &hf_ttp,
+      {
+        "Time to Persist", "couchbase.ttp",
+        FT_UINT32, BASE_DEC, NULL, 0x0,
+        "Approximate time needed to persist the key (milliseconds)", HFILL
+      }
+    },
+
+    {
+      &hf_ttr,
+      {
+        "Time to Replicate", "couchbase.ttr",
+        FT_UINT32, BASE_DEC, NULL, 0x0,
+        "Approximate time needed to replicate the key (milliseconds)", HFILL
       }
     },
 
@@ -1057,7 +1100,7 @@ proto_register_couchbase(void)
     {
       &hf_extras_flags_backfill,
       {
-        "Backfill age", "couchbase.extras.flags.backfill",
+        "Backfill Age", "couchbase.extras.flags.backfill",
         FT_BOOLEAN, 16, TFS(&tfs_set_notset), 0x01,
         NULL, HFILL
       }
@@ -1093,7 +1136,7 @@ proto_register_couchbase(void)
     {
       &hf_extras_flags_support_ack,
       {
-        "Support ack", "couchbase.extras.flags.support_ack",
+        "Support ACK", "couchbase.extras.flags.support_ack",
         FT_BOOLEAN, 16, TFS(&tfs_set_notset), 0x10,
         NULL, HFILL
       }
@@ -1102,7 +1145,7 @@ proto_register_couchbase(void)
     {
       &hf_extras_flags_request_keys_only,
       {
-        "Request keys only", "couchbase.extras.flags.request_keys_only",
+        "Request Keys Only", "couchbase.extras.flags.request_keys_only",
         FT_BOOLEAN, 16, TFS(&tfs_set_notset), 0x20,
         NULL, HFILL
       }
@@ -1120,7 +1163,7 @@ proto_register_couchbase(void)
     {
       &hf_extras_flags_registered_client,
       {
-        "Registered client", "couchbase.extras.flags.registered_client",
+        "Registered Client", "couchbase.extras.flags.registered_client",
         FT_BOOLEAN, 16, TFS(&tfs_set_notset), 0x80,
         NULL, HFILL
       }
@@ -1138,7 +1181,7 @@ proto_register_couchbase(void)
     {
       &hf_extras_delta,
       {
-        "Amount to add", "couchbase.extras.delta",
+        "Amount to Add", "couchbase.extras.delta",
         FT_UINT64, BASE_DEC, NULL, 0x0,
         NULL, HFILL
       }
@@ -1147,7 +1190,7 @@ proto_register_couchbase(void)
     {
       &hf_extras_initial,
       {
-        "Initial value", "couchbase.extras.initial",
+        "Initial Value", "couchbase.extras.initial",
         FT_UINT64, BASE_DEC, NULL, 0x0,
         NULL, HFILL
       }
@@ -1165,7 +1208,7 @@ proto_register_couchbase(void)
     {
       &hf_extras_missing,
       {
-        "Extras missing", "couchbase.extras.missing",
+        "Extras Missing", "couchbase.extras.missing",
         FT_NONE, BASE_NONE, NULL, 0x0,
         "Extras is mandatory for this command", HFILL
       }
@@ -1183,7 +1226,7 @@ proto_register_couchbase(void)
     {
       &hf_key_missing,
       {
-        "Key missing", "couchbase.key.missing",
+        "Key Missing", "couchbase.key.missing",
         FT_NONE, BASE_NONE, NULL, 0x0,
         "Key is mandatory for this command", HFILL
       }
@@ -1201,7 +1244,7 @@ proto_register_couchbase(void)
     {
       &hf_value_missing,
       {
-        "Value missing", "couchbase.value.missing",
+        "Value Missing", "couchbase.value.missing",
         FT_NONE, BASE_NONE, NULL, 0x0,
         "Value is mandatory for this command", HFILL
       }
@@ -1215,12 +1258,67 @@ proto_register_couchbase(void)
         NULL, HFILL
       }
     },
+
+    {
+      &hf_observe,
+      {
+        "Observe", "couchbase.observe",
+        FT_STRING, BASE_NONE, NULL, 0x0,
+        "The observe properties", HFILL
+      }
+    },
+
+    {
+      &hf_observe_key,
+      {
+        "Key", "couchbase.observe.key",
+        FT_STRING, BASE_NONE, NULL, 0x0,
+        "The observable key", HFILL
+      }
+    },
+
+    {
+      &hf_observe_keylength,
+      {
+        "Key Length", "couchbase.observe.keylength",
+        FT_UINT16, BASE_DEC, NULL, 0x0,
+        "The length of the observable key", HFILL
+      }
+    },
+
+    {
+      &hf_observe_vbucket,
+      {
+        "VBucket", "couchbase.observe.vbucket",
+        FT_UINT16, BASE_HEX, NULL, 0x0,
+        "VBucket of the observable key", HFILL
+      }
+    },
+
+    {
+      &hf_observe_status,
+      {
+        "Status", "couchbase.observe.status",
+        FT_UINT8, BASE_HEX, NULL, 0x0,
+        "Status of the observable key", HFILL
+      }
+    },
+
+    {
+      &hf_observe_cas,
+      {
+        "CAS", "couchbase.observe.cas",
+        FT_UINT64, BASE_HEX, NULL, 0x0,
+        "CAS value of the observable key", HFILL
+      }
+    },
   };
 
   static gint *ett[] = {
     &ett_couchbase,
     &ett_extras,
-    &ett_extras_flags
+    &ett_extras_flags,
+    &ett_observe
   };
 
   module_t *couchbase_module;
