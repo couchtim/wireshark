@@ -762,22 +762,6 @@ dissect_value(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
         illegal = TRUE;
       }
     }
-  } else {
-    if ((opcode == PROTOCOL_BINARY_CMD_SET) ||
-        (opcode == PROTOCOL_BINARY_CMD_ADD) ||
-        (opcode == PROTOCOL_BINARY_CMD_REPLACE) ||
-        (opcode == PROTOCOL_BINARY_CMD_SETQ) ||
-        (opcode == PROTOCOL_BINARY_CMD_ADDQ) ||
-        (opcode == PROTOCOL_BINARY_CMD_REPLACEQ) ||
-        (opcode == PROTOCOL_BINARY_CMD_APPEND) ||
-        (opcode == PROTOCOL_BINARY_CMD_PREPEND) ||
-        (opcode == PROTOCOL_BINARY_CMD_APPENDQ) ||
-        (opcode == PROTOCOL_BINARY_CMD_PREPENDQ)) {
-      /* Request must have a value */
-      if (request) {
-        missing = TRUE;
-      }
-    }
   }
 
   if (illegal) {
