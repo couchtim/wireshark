@@ -164,7 +164,8 @@
  /* Commands from EP (eventually persistent) and bucket engines */
 #define PROTOCOL_BINARY_CMD_STOP_PERSISTENCE        0x80
 #define PROTOCOL_BINARY_CMD_START_PERSISTENCE       0x81
-#define PROTOCOL_BINARY_CMD_SET_FLUSH_PARAM         0x82
+#define PROTOCOL_BINARY_CMD_SET_PARAM               0x82
+#define PROTOCOL_BINARY_CMD_GET_REPLICA             0x83
 #define PROTOCOL_BINARY_CMD_CREATE_BUCKET           0x85
 #define PROTOCOL_BINARY_CMD_DELETE_BUCKET           0x86
 #define PROTOCOL_BINARY_CMD_LIST_BUCKETS            0x87
@@ -172,11 +173,11 @@
 #define PROTOCOL_BINARY_CMD_SELECT_BUCKET           0x89
 #define PROTOCOL_BINARY_CMD_START_REPLICATION       0x90
 #define PROTOCOL_BINARY_CMD_STOP_REPLICATION        0x91
-#define PROTOCOL_BINARY_CMD_SET_TAP_PARAM           0x92
+#define PROTOCOL_BINARY_CMD_OBSERVE                 0x92
 #define PROTOCOL_BINARY_CMD_EVICT_KEY               0x93
 #define PROTOCOL_BINARY_CMD_GET_LOCKED              0x94
 #define PROTOCOL_BINARY_CMD_UNLOCK_KEY              0x95
-#define PROTOCOL_BINARY_CMD_OBSERVE                 0x96
+#define PROTOCOL_BINARY_CMD_SYNC                    0x96
 #define PROTOCOL_BINARY_CMD_LAST_CLOSED_CHECKPOINT  0x97
 #define PROTOCOL_BINARY_CMD_RESTORE_FILE            0x98
 #define PROTOCOL_BINARY_CMD_RESTORE_ABORT           0x99
@@ -334,7 +335,8 @@ static const value_string opcode_vals[] = {
   { PROTOCOL_BINARY_CMD_TAP_CHECKPOINT_END,         "TAP Checkpoint End"       },
   { PROTOCOL_BINARY_CMD_STOP_PERSISTENCE,           "Stop Persistence"         },
   { PROTOCOL_BINARY_CMD_START_PERSISTENCE,          "Start Persistence"        },
-  { PROTOCOL_BINARY_CMD_SET_FLUSH_PARAM,            "Set Flush Parameter"      },
+  { PROTOCOL_BINARY_CMD_SET_PARAM,                  "Set Parameter"            },
+  { PROTOCOL_BINARY_CMD_GET_REPLICA,                "Get Replica"              },
   { PROTOCOL_BINARY_CMD_CREATE_BUCKET,              "Create Bucket"            },
   { PROTOCOL_BINARY_CMD_DELETE_BUCKET,              "Delete Bucket"            },
   { PROTOCOL_BINARY_CMD_LIST_BUCKETS,               "List Buckets"             },
@@ -342,11 +344,11 @@ static const value_string opcode_vals[] = {
   { PROTOCOL_BINARY_CMD_SELECT_BUCKET,              "Select Bucket"            },
   { PROTOCOL_BINARY_CMD_START_REPLICATION,          "Start Replication"        },
   { PROTOCOL_BINARY_CMD_STOP_REPLICATION,           "Stop Replication"         },
-  { PROTOCOL_BINARY_CMD_SET_TAP_PARAM,              "Set TAP Parameter"        },
   { PROTOCOL_BINARY_CMD_EVICT_KEY,                  "Evict Key"                },
   { PROTOCOL_BINARY_CMD_GET_LOCKED,                 "Get Locked"               },
   { PROTOCOL_BINARY_CMD_UNLOCK_KEY,                 "Unlock Key"               },
   { PROTOCOL_BINARY_CMD_OBSERVE,                    "Observe"                  },
+  { PROTOCOL_BINARY_CMD_SYNC,                       "Sync"                     },
   { PROTOCOL_BINARY_CMD_LAST_CLOSED_CHECKPOINT,     "Last Closed Checkpoint"   },
   { PROTOCOL_BINARY_CMD_RESTORE_FILE,               "Restore File"             },
   { PROTOCOL_BINARY_CMD_RESTORE_ABORT,              "Restore Abort"            },
